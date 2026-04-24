@@ -243,11 +243,7 @@ function buildNestedTree(node, adjacencyList) {
 }
 
 
-// ─── Depth calculation ───────────────────────────────────────────────────────
-//
-// Depth = number of *nodes* (not edges) on the longest root-to-leaf path.
-// A->B->C has depth 3, not 2. A lone node has depth 1.
-
+//calculate depth
 function longestRootToLeafLength(node, adjacencyList) {
   const children = adjacencyList.get(node) ?? [];
 
@@ -261,12 +257,7 @@ function longestRootToLeafLength(node, adjacencyList) {
 }
 
 
-// ─── Cycle detection ─────────────────────────────────────────────────────────
-//
-// Standard DFS with a "currently active path" tracking set.
-// If we arrive at a node that's already on our current path, we've gone in circles.
-// `fullyExplored` prevents us from revisiting nodes we already know are cycle-free.
-
+//cycle detection 
 function detectCycleFromRoot(startNode, adjacencyList) {
   const fullyExplored = new Set();
   const nodesOnCurrentPath = new Set();
@@ -280,7 +271,6 @@ function detectCycleFromRoot(startNode, adjacencyList) {
         const cycleFoundBelow = dfs(neighbor);
         if (cycleFoundBelow) return true;
       } else if (nodesOnCurrentPath.has(neighbor)) {
-        // We looped back to something on our active stack — cycle confirmed
         return true;
       }
     }
@@ -293,11 +283,6 @@ function detectCycleFromRoot(startNode, adjacencyList) {
 }
 
 
-// ─── Stage 6: Summary ─────────────────────────────────────────────────────────
-//
-// largest_tree_root: tree with greatest depth. Tiebreaker is alphabetical order
-// on the root label (so "A" beats "B" at equal depth).
-// We use reduce rather than sort+first because we only need one pass.
 
 function computeSummary(hierarchies) {
   const validTrees = hierarchies.filter(h => !h.has_cycle);
