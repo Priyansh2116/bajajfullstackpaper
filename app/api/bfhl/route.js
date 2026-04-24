@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-
-// My specific submitter identity
+//My submitter identity
 const SUBMITTER_IDENTITY = {
   user_id: 'priyanshsonthalia_13032005',
   email_id: 'ps9746@srmist.edu.in',
@@ -16,7 +15,7 @@ const CORS_HEADERS = {
 export async function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
-
+//Api endpoint
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -28,7 +27,7 @@ export async function POST(request) {
         { status: 400, headers: CORS_HEADERS }
       );
     }
-
+//returning raw response
     const result = analyzeNodeList(data);
     return NextResponse.json(result, { headers: CORS_HEADERS });
   } catch {
@@ -38,9 +37,7 @@ export async function POST(request) {
     );
   }
 }
-
-
-//main pipeline
+//analyse and fiter node list
 function analyzeNodeList(rawEntries) {
   const { validEdges, invalidEntries } = classifyEntries(rawEntries);
   const { uniqueEdges, duplicateEdges } = deduplicateEdges(validEdges);
@@ -56,11 +53,7 @@ function analyzeNodeList(rawEntries) {
     summary,
   };
 }
-
-
-//remove self loops and make sure the given input is vali
-//this part of the code also looks for self loops
-
+//single letter to letter inputs only
 const EDGE_FORMAT = /^[A-Z]->[A-Z]$/;
 
 function classifyEntries(rawEntries) {
@@ -69,15 +62,12 @@ function classifyEntries(rawEntries) {
 
   for (const raw of rawEntries) {
     if (typeof raw !== 'string') {
-
       invalidEntries.push(String(raw));
       continue;
     }
 
     const entry = raw.trim();
     const matchesPattern = EDGE_FORMAT.test(entry);
-
-    // In "A->B", index 0 is parent and index 3 is child
     const isSelfLoop = entry[0] === entry[3];
 
     if (!matchesPattern || isSelfLoop) {
@@ -90,215 +80,171 @@ function classifyEntries(rawEntries) {
   return { validEdges, invalidEntries };
 }
 
-
-//check for duplocate edges
 function deduplicateEdges(edges) {
-  const alreadySeen = new Set();
-  const alreadyFlaggedAsDuplicate = new Set();
+  const seen = new Set();
+  const duplicatesSet = new Set();
   const uniqueEdges = [];
   const duplicateEdges = [];
 
   for (const edge of edges) {
-    if (!alreadySeen.has(edge)) {
-      alreadySeen.add(edge);
+    if (!seen.has(edge)) {
+      seen.add(edge);
       uniqueEdges.push(edge);
-    } else if (!alreadyFlaggedAsDuplicate.has(edge)) {
-      alreadyFlaggedAsDuplicate.add(edge);
+    } else if (!duplicatesSet.has(edge)) {
+      duplicatesSet.add(edge);
       duplicateEdges.push(edge);
     }
-    // Third+ occurrence: absorbed quietly
   }
 
   return { uniqueEdges, duplicateEdges };
 }
 
-
-
 function buildDirectedGraph(edges) {
-  // parent -> list of its accepted children
-  const adjacencyList = new Map();
-
-  // child -> the one parent that "won" the multi-parent race
-  const childToParentMap = new Map();
-
-  // Used later to sort hierarchies by when they first appear in the input
-  const nodeFirstSeenIndex = new Map();
-  let seenCounter = 0;
-
-  function markNodeAsSeen(node) {
-    if (!nodeFirstSeenIndex.has(node)) {
-      nodeFirstSeenIndex.set(node, seenCounter++);
-    }
-  }
+  const adjList = new Map();
+  const parents = new Map();
+  const allNodes = new Set();
 
   for (const edge of edges) {
     const [parentNode, childNode] = edge.split('->');
+//verify if the node already has a parent
+    const hasParent = parents.has(childNode);
+    if (hasParent) continue;
 
-    // Multi-parent rule: skip this edge if the child already has a parent
-    const childAlreadyHasParent = childToParentMap.has(childNode);
-    if (childAlreadyHasParent) continue;
+    parents.set(childNode, parentNode);
 
-    childToParentMap.set(childNode, parentNode);
-
-    if (!adjacencyList.has(parentNode)) {
-      adjacencyList.set(parentNode, []);
+    if (!adjList.has(parentNode)) {
+      adjList.set(parentNode, []);
     }
-    adjacencyList.get(parentNode).push(childNode);
+    adjList.get(parentNode).push(childNode);
 
-    markNodeAsSeen(parentNode);
-    markNodeAsSeen(childNode);
+    allNodes.add(parentNode);
+    allNodes.add(childNode);
   }
 
-  const allNodes = new Set(nodeFirstSeenIndex.keys());
-
-  return { adjacencyList, childToParentMap, nodeFirstSeenIndex, allNodes };
+  return { adjList, parents, allNodes };
 }
 
-
-//group into components
 function extractHierarchies(graph) {
-  const { adjacencyList, childToParentMap, nodeFirstSeenIndex, allNodes } = graph;
-
-  const componentGroups = groupIntoComponents(allNodes, childToParentMap);
-
-  componentGroups.sort((groupA, groupB) => {
-    const earliestInA = Math.min(...groupA.map(n => nodeFirstSeenIndex.get(n)));
-    const earliestInB = Math.min(...groupB.map(n => nodeFirstSeenIndex.get(n)));
-    return earliestInA - earliestInB;
-  });
+  const { adjList, parents, allNodes } = graph;
+  const componentGroups = groupIntoComponents(allNodes, parents);
 
   return componentGroups.map(nodes =>
-    describeComponent(nodes, adjacencyList, childToParentMap)
+    describeComponent(nodes, adjList, parents)
   );
 }
 
+function groupIntoComponents(allNodes, parents) {
+  const rep = {};
+  for (const node of allNodes) rep[node] = node;
 
-//component grouping with union find
-function groupIntoComponents(allNodes, childToParentMap) {
-  const representativeOf = {};
-  for (const node of allNodes) representativeOf[node] = node;
-
-  function findRepresentative(node) {
-    // Path compression: point directly to the root on the way back up
-    if (representativeOf[node] !== node) {
-      representativeOf[node] = findRepresentative(representativeOf[node]);
+  function find(node) {
+    if (rep[node] !== node) {
+      rep[node] = find(rep[node]);
     }
-    return representativeOf[node];
+    return rep[node];
   }
 
-  function mergeGroups(nodeA, nodeB) {
-    representativeOf[findRepresentative(nodeA)] = findRepresentative(nodeB);
+  function merge(nodeA, nodeB) {
+    rep[find(nodeA)] = find(nodeB);
   }
 
-  // Every parent-child relationship means they're in the same component
-  for (const [child, parent] of childToParentMap) {
-    mergeGroups(child, parent);
+  for (const [child, parent] of parents) {
+    merge(child, parent);
   }
 
   const buckets = new Map();
   for (const node of allNodes) {
-    const rep = findRepresentative(node);
-    if (!buckets.has(rep)) buckets.set(rep, []);
-    buckets.get(rep).push(node);
+    const rootRep = find(node);
+    if (!buckets.has(rootRep)) buckets.set(rootRep, []);
+    buckets.get(rootRep).push(node);
   }
 
   return [...buckets.values()];
 }
 
+function describeComponent(nodes, adjList, parents) {
+  const noParents = nodes.filter(node => !parents.has(node));
 
-//describing a singe component
-function describeComponent(nodes, adjacencyList, childToParentMap) {
-  const nodesWithNoParent = nodes.filter(node => !childToParentMap.has(node));
-
-  if (nodesWithNoParent.length === 0) {
-    const alphabeticallyFirstNode = [...nodes].sort()[0];
-    return { root: alphabeticallyFirstNode, tree: {}, has_cycle: true };
+  if (noParents.length === 0) {
+    const firstNode = [...nodes].sort()[0];
+    return { root: firstNode, tree: {}, has_cycle: true };
   }
 
-  const rootNode = nodesWithNoParent[0];
+  const rootNode = noParents[0];
+  //to verify there are no internal loops
+  const hasCycle = detectCycleFromRoot(rootNode, adjList);
 
-  const cycleDetected = detectCycleFromRoot(rootNode, adjacencyList);
-
-  if (cycleDetected) {
+  if (hasCycle) {
     return { root: rootNode, tree: {}, has_cycle: true };
   }
 
-  const nestedTreeStructure = { [rootNode]: buildNestedTree(rootNode, adjacencyList) };
-  const treeDepth = longestRootToLeafLength(rootNode, adjacencyList);
+  const nestedTreeStructure = { [rootNode]: buildNestedTree(rootNode, adjList) };
+  const treeDepth = getTreeDepth(rootNode, adjList);
 
   return { root: rootNode, tree: nestedTreeStructure, depth: treeDepth };
 }
-
-
-//building nexted treee object
-function buildNestedTree(node, adjacencyList) {
-  const children = adjacencyList.get(node) ?? [];
+//construct nested object representing the tree
+function buildNestedTree(node, adjList) {
+  const children = adjList.get(node) ?? [];
   const subtree = {};
 
   for (const child of children) {
-    subtree[child] = buildNestedTree(child, adjacencyList);
+    subtree[child] = buildNestedTree(child, adjList);
   }
 
   return subtree;
 }
-
-
-//calculate depth
-function longestRootToLeafLength(node, adjacencyList) {
-  const children = adjacencyList.get(node) ?? [];
+//calc tree depth recursively
+function getTreeDepth(node, adjList) {
+  const children = adjList.get(node) ?? [];
 
   if (children.length === 0) return 1;
 
-  const longestChildSubpath = Math.max(
-    ...children.map(child => longestRootToLeafLength(child, adjacencyList))
+  const maxChildDepth = Math.max(
+    ...children.map(child => getTreeDepth(child, adjList))
   );
 
-  return 1 + longestChildSubpath;
+  return 1 + maxChildDepth;
 }
-
-
-//cycle detection 
-function detectCycleFromRoot(startNode, adjacencyList) {
+//use dfs
+function detectCycleFromRoot(startNode, adjList) {
   const fullyExplored = new Set();
-  const nodesOnCurrentPath = new Set();
+  const currentPath = new Set();
 
   function dfs(node) {
     fullyExplored.add(node);
-    nodesOnCurrentPath.add(node);
+    currentPath.add(node);
 
-    for (const neighbor of (adjacencyList.get(node) ?? [])) {
+    for (const neighbor of (adjList.get(node) ?? [])) {
       if (!fullyExplored.has(neighbor)) {
-        const cycleFoundBelow = dfs(neighbor);
-        if (cycleFoundBelow) return true;
-      } else if (nodesOnCurrentPath.has(neighbor)) {
+        if (dfs(neighbor)) return true;
+      } else if (currentPath.has(neighbor)) {
         return true;
       }
     }
 
-    nodesOnCurrentPath.delete(node); // backtrack cleanly
+    currentPath.delete(node);
     return false;
   }
 
   return dfs(startNode);
 }
-
-
-
+// Find tree with the max depth 
 function computeSummary(hierarchies) {
   const validTrees = hierarchies.filter(h => !h.has_cycle);
   const cyclicGroups = hierarchies.filter(h => h.has_cycle);
 
-  const deepestTree = validTrees.reduce((currentBest, candidate) => {
-    if (!currentBest) return candidate;
+  const deepestTree = validTrees.reduce((best, current) => {
+    if (!best) return current;
 
-    const candidateIsDeeper = candidate.depth > currentBest.depth;
-    const depthIsTied = candidate.depth === currentBest.depth;
-    const candidateRootComesFirst = candidate.root < currentBest.root;
+    const isDeeper = current.depth > best.depth;
+    const isTied = current.depth === best.depth;
+    const comesFirst = current.root < best.root;
 
-    if (candidateIsDeeper || (depthIsTied && candidateRootComesFirst)) {
-      return candidate;
+    if (isDeeper || (isTied && comesFirst)) {
+      return current;
     }
-    return currentBest;
+    return best;
   }, null);
 
   return {
